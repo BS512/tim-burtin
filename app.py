@@ -18,6 +18,7 @@ df_melted = df.melt(
 df_melted["Gram_Staining"] = df_melted["Gram_Staining"].str.strip().str.lower()
 
 # Logarithmic scaling & score calculation
+# (Higher score = lower MIC required = higher effectiveness in reducing infection)
 df_melted["Log_MIC"] = np.log10(df_melted["MIC"])
 min_log, max_log = df_melted["Log_MIC"].min(), df_melted["Log_MIC"].max()
 df_melted["Effectiveness_Score"] = (max_log - df_melted["Log_MIC"]) / (max_log - min_log) * 100
@@ -52,7 +53,7 @@ df_melted["Color"] = df_melted.apply(get_cell_color, axis=1)
 heatmap = alt.Chart(df_melted).mark_rect(stroke='white', strokeWidth=1).encode(
     x=alt.X('Antibiotic:N', title=None, sort=['Penicillin', 'Streptomycin', 'Neomycin']),
     y=alt.Y('Bacteria:N', title=None, sort=sorted_species),
-    color=alt.Color('Color:N', scale=None), # Uses computed hex values directly
+    color=alt.Color('Color:N', scale=None),
     tooltip=[
         alt.Tooltip('Bacteria:N', title='Bacteria'),
         alt.Tooltip('Gram_Staining:N', title='Gram Staining'),
@@ -61,11 +62,11 @@ heatmap = alt.Chart(df_melted).mark_rect(stroke='white', strokeWidth=1).encode(
         alt.Tooltip('Effectiveness_Score:Q', title='Effectiveness (%)', format='.1f')
     ]
 ).properties(
-    width=380,
-    height=520,
+    width=320,
+    height=540,
     title=alt.TitleParams(
-        text="Antibiotic Effectiveness Matrix by Gram Staining",
-        subtitle="Gram-Negative (Pink Gradient) vs Gram-Positive (Purple Gradient)",
+        text="Antibiotic Effectiveness Matrix",
+        subtitle="Gram-Negative (Pink) vs Gram-Positive (Purple)",
         anchor="start",
         fontSize=16,
         subtitleFontSize=12
@@ -83,22 +84,39 @@ divider = alt.Chart(divider_df).mark_rule(
 # Final Layout Assembly
 final_chart = alt.layer(heatmap, divider).configure_view(strokeWidth=0)
 
-# 5. Streamlit App Display & Custom Legend
-st.set_page_config(page_title="Burtin Antibiotic Analysis", layout="centered")
+# 5. Streamlit App Layout
+st.set_page_config(page_title="Burtin Antibiotic Analysis", layout="wide")
 st.title("Antibiotic Resistance & Gram Staining Correlation")
 
-st.altair_chart(final_chart, use_container_width=True)
+# Split page layout into Chart (left) and Legend/Insights Panel (right)
+col1, col2 = st.columns([1.6, 1])
 
-# Custom Streamlit HTML Legend (Clean & Minimalist)
-st.markdown("""
-<div style="display: flex; gap: 30px; font-size: 14px; margin-top: -10px;">
-    <div>
-        <span style="font-weight: bold; color: #c2185b;">■ Gram-Negative (Pink):</span> 
-        Light Pink (Low Effectiveness) → Dark Pink (High Effectiveness)
+with col1:
+    st.altair_chart(final_chart, use_container_width=True)
+
+with col2:
+    st.markdown("### 📊 Legend & Takeaways")
+    
+    st.markdown("""
+    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #4a148c; margin-bottom: 20px;">
+        <p style="margin-bottom: 8px; font-weight: bold; color: #c2185b;">
+            ■ Gram-Negative (Pink)
+        </p>
+        <p style="font-size: 13px; margin-bottom: 12px; color: #555;">
+            Shading represents effectiveness calculated as percentage of lowest concentration required to reduce infection (100% = most effective).
+        </p>
+        <p style="margin-bottom: 8px; font-weight: bold; color: #4a148c;">
+            ■ Gram-Positive (Purple)
+        </p>
+        <p style="font-size: 13px; margin-bottom: 0px; color: #555;">
+            Shading represents effectiveness calculated as percentage of lowest concentration required to reduce infection (100% = most effective).
+        </p>
     </div>
-    <div>
-        <span style="font-weight: bold; color: #4a148c;">■ Gram-Positive (Purple):</span> 
-        Light Purple (Low Effectiveness) → Dark Purple (High Effectiveness)
-    </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+
+    st.markdown("#### 🔬 Key Clinical Insights")
+    st.markdown("""
+    * **Penicillin:** Tends to appear exceptionally effective against **Gram-positive** strains, but shows very weak response against Gram-negative species.
+    * **Neomycin:** Demonstrates strong effectiveness against **Gram-negative** strains.
+    * **Streptomycin:** Exhibits a moderate, broad-spectrum degree of effectiveness across **most types of strains** regardless of Gram status.
+    """)
