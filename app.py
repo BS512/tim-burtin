@@ -3,7 +3,7 @@ import numpy as np
 import altair as alt
 import streamlit as st
 
-# 1. Load Data directly from the JSON source or local dictionary
+# 1. Load Data directly from the JSON source
 url = "https://raw.githubusercontent.com/BS512/tim-burtin/main/burtin.json"
 df = pd.read_json(url)
 
@@ -16,17 +16,14 @@ df_melted = df.melt(
     value_name="MIC"
 )
 
-# Invert logarithmic MIC values so higher values represent higher effectiveness (suppression power)
-# Using Log10 transform since MIC values range across several orders of magnitude (0.001 to 870)
+# Invert logarithmic MIC values so higher values represent higher effectiveness
 df_melted["Log_MIC"] = np.log10(df_melted["MIC"])
 min_log, max_log = df_melted["Log_MIC"].min(), df_melted["Log_MIC"].max()
 
-# Percentage score relative to worst/best effectiveness across the dataset
-# (100% = most effective / lowest MIC; 0% = least effective / highest MIC)
+# Percentage score (100% = most effective / lowest MIC; 0% = least effective / highest MIC)
 df_melted["Effectiveness_Score"] = (max_log - df_melted["Log_MIC"]) / (max_log - min_log) * 100
 
-# Group species by Gram Staining to ensure clear separation
-# Order bacteria alphabetically within each Gram status group
+# Group species by Gram Staining and sort
 df_melted["Gram_Staining"] = df_melted["Gram_Staining"].str.strip().str.lower()
 df_melted = df_melted.sort_values(by=["Gram_Staining", "Bacteria"])
 
@@ -34,7 +31,6 @@ df_melted = df_melted.sort_values(by=["Gram_Staining", "Bacteria"])
 neg_species_count = df[df["Gram_Staining"].str.strip().str.lower() == "negative"]["Bacteria"].nunique()
 
 # 3. Build Altair Visualizations
-# Heatmap base tile chart
 heatmap = alt.Chart(df_melted).mark_rect().encode(
     x=alt.X('Antibiotic:N', title=None, sort=['Penicillin', 'Streptomycin', 'Neomycin']),
     y=alt.Y('Bacteria:N', title=None, sort=df_melted['Bacteria'].unique().tolist()),
@@ -43,8 +39,8 @@ heatmap = alt.Chart(df_melted).mark_rect().encode(
         title="Effectiveness (%)",
         scale=alt.Scale(
             domain=[0, 100],
-            # Mapping distinct color ramps for storytelling: Purple hue for Gram-Negative, Pink hue for Gram-Positive
-            range=['#f3e5f5', '#4a148c'] # Blended purple palette
+            # Updated palette: Light green to deep green
+            range=['#e8f5e9', '#1b5e20'] 
         )
     ),
     tooltip=[
@@ -75,13 +71,13 @@ divider_line = alt.Chart(pd.DataFrame({'y': [neg_species_count - 0.5]})).mark_ru
     y='y:Q'
 )
 
-# Text annotation overlaying the chart
+# Text annotation overlaying the chart with the new colors
 annotation_neg = alt.Chart(pd.DataFrame({'text': ['Gram-Negative Group']})).mark_text(
-    align='left', baseline='top', dx=130, dy=-240, fontWeight='bold', color='#4a148c'
+    align='left', baseline='top', dx=130, dy=-240, fontWeight='bold', color='#1b5e20' # Green
 ).encode(text='text:N')
 
 annotation_pos = alt.Chart(pd.DataFrame({'text': ['Gram-Positive Group']})).mark_text(
-    align='left', baseline='bottom', dx=130, dy=230, fontWeight='bold', color='#c2185b'
+    align='left', baseline='bottom', dx=130, dy=230, fontWeight='bold', color='#4a148c' # Purple
 ).encode(text='text:N')
 
 # Layer components together
