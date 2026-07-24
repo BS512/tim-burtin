@@ -3,12 +3,11 @@ import numpy as np
 import altair as alt
 import streamlit as st
 
-# 1. Load Data directly from the JSON source
+# 1. Load Data
 url = "https://raw.githubusercontent.com/BS512/tim-burtin/main/burtin.json"
 df = pd.read_json(url)
 
-# 2. Data Preprocessing & Normalization
-# Melt antibiotics into long format
+# 2. Data Preprocessing
 df_melted = df.melt(
     id_vars=["Bacteria", "Gram_Staining", "Genus"],
     value_vars=["Penicillin", "Streptomycin", "Neomycin"],
@@ -16,107 +15,90 @@ df_melted = df.melt(
     value_name="MIC"
 )
 
-# Clean up Gram_Staining column strings
 df_melted["Gram_Staining"] = df_melted["Gram_Staining"].str.strip().str.lower()
 
-# Invert logarithmic MIC values so higher values represent higher effectiveness
+# Logarithmic scaling & score calculation
 df_melted["Log_MIC"] = np.log10(df_melted["MIC"])
 min_log, max_log = df_melted["Log_MIC"].min(), df_melted["Log_MIC"].max()
-
-# Percentage score (100% = most effective / lowest MIC; 0% = least effective / highest MIC)
 df_melted["Effectiveness_Score"] = (max_log - df_melted["Log_MIC"]) / (max_log - min_log) * 100
 
-# Group species by Gram Staining and sort alphabetically
+# Sort species so Gram-negative and Gram-positive are grouped cleanly
 df_melted = df_melted.sort_values(by=["Gram_Staining", "Bacteria"])
 sorted_species = df_melted["Bacteria"].unique().tolist()
 
-# Gram-negative species count to calculate separation line position
-neg_species_count = df[df["Gram_Staining"].str.strip().str.lower() == "negative"]["Bacteria"].nunique()
+# 3. Pure Python Color Interpolation (Pink for Negative, Purple for Positive)
+def hex_to_rgb(hex_str):
+    hex_str = hex_str.lstrip('#')
+    return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
 
-# 3. Build Heatmap Layers with Independent Color Scales
+def rgb_to_hex(rgb):
+    return '#{:02x}{:02x}{:02x}'.format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
 
-# Base encoding shared across both layers
-base = alt.Chart(df_melted).encode(
+def get_cell_color(row):
+    pct = max(0.0, min(1.0, row["Effectiveness_Score"] / 100.0))
+    if row["Gram_Staining"] == "negative":
+        # Pink Gradient: Light (#fce4ec) to Deep (#c2185b)
+        c1, c2 = hex_to_rgb("#fce4ec"), hex_to_rgb("#c2185b")
+    else:
+        # Purple Gradient: Light (#f3e5f5) to Deep (#4a148c)
+        c1, c2 = hex_to_rgb("#f3e5f5"), hex_to_rgb("#4a148c")
+    
+    interpolated = [c1[i] + (c2[i] - c1[i]) * pct for i in range(3)]
+    return rgb_to_hex(interpolated)
+
+df_melted["Color"] = df_melted.apply(get_cell_color, axis=1)
+
+# 4. Build Altair Heatmap
+heatmap = alt.Chart(df_melted).mark_rect(stroke='white', strokeWidth=1).encode(
     x=alt.X('Antibiotic:N', title=None, sort=['Penicillin', 'Streptomycin', 'Neomycin']),
     y=alt.Y('Bacteria:N', title=None, sort=sorted_species),
+    color=alt.Color('Color:N', scale=None), # Uses computed hex values directly
     tooltip=[
-        alt.Tooltip('Bacteria:N', title='Bacteria Species'),
+        alt.Tooltip('Bacteria:N', title='Bacteria'),
         alt.Tooltip('Gram_Staining:N', title='Gram Staining'),
         alt.Tooltip('Antibiotic:N', title='Antibiotic'),
         alt.Tooltip('MIC:Q', title='MIC (µg/ml)'),
-        alt.Tooltip('Effectiveness_Score:Q', title='Effectiveness Score (%)', format='.1f')
+        alt.Tooltip('Effectiveness_Score:Q', title='Effectiveness (%)', format='.1f')
     ]
-)
-
-# Layer 1: Gram-Negative -> PINK palette
-heatmap_neg = base.transform_filter(
-    alt.datum.Gram_Staining == 'negative'
-).mark_rect().encode(
-    color=alt.Color(
-        'Effectiveness_Score:Q',
-        title="Gram-Neg Effectiveness (%)",
-        scale=alt.Scale(
-            domain=[0, 100],
-            range=['#fce4ec', '#c2185b'] # Light pink to Deep Pink
-        )
-    )
-)
-
-# Layer 2: Gram-Positive -> PURPLE palette
-heatmap_pos = base.transform_filter(
-    alt.datum.Gram_Staining == 'positive'
-).mark_rect().encode(
-    color=alt.Color(
-        'Effectiveness_Score:Q',
-        title="Gram-Pos Effectiveness (%)",
-        scale=alt.Scale(
-            domain=[0, 100],
-            range=['#f3e5f5', '#4a148c'] # Light purple to Deep Purple
-        )
-    )
-)
-
-# Rule separator line dividing Gram-negative and Gram-positive species
-divider_line = alt.Chart(pd.DataFrame({'y': [neg_species_count - 0.5]})).mark_rule(
-    color='black',
-    strokeWidth=2,
-    strokeDash=[4, 4]
-).encode(
-    y='y:Q'
-)
-
-# Text annotations
-annotation_neg = alt.Chart(pd.DataFrame({'text': ['Gram-Negative']})).mark_text(
-    align='left', baseline='top', dx=130, dy=-240, fontWeight='bold', color='#c2185b' # Pink
-).encode(text='text:N')
-
-annotation_pos = alt.Chart(pd.DataFrame({'text': ['Gram-Positive']})).mark_text(
-    align='left', baseline='bottom', dx=130, dy=230, fontWeight='bold', color='#4a148c' # Purple
-).encode(text='text:N')
-
-# Layer all components and resolve color scales independently
-final_chart = alt.layer(
-    heatmap_neg, heatmap_pos, divider_line, annotation_neg, annotation_pos
-).resolve_scale(
-    color='independent'
 ).properties(
-    width=350,
-    height=550,
+    width=380,
+    height=520,
     title=alt.TitleParams(
         text="Antibiotic Effectiveness Matrix by Gram Staining",
-        subtitle="Gram-Negative (Pink) vs Gram-Positive (Purple)",
+        subtitle="Gram-Negative (Pink Gradient) vs Gram-Positive (Purple Gradient)",
         anchor="start",
-        fontSize=18,
-        subtitleFontSize=13
+        fontSize=16,
+        subtitleFontSize=12
     )
-).configure_view(
-    strokeWidth=0
-).configure_axis(
-    labelFontSize=11,
-    titleFontSize=12
 )
 
-# 4. Streamlit App Layout
+# Rule separator dividing Gram groups
+neg_count = df[df["Gram_Staining"].str.strip().str.lower() == "negative"]["Bacteria"].nunique()
+
+divider_df = pd.DataFrame({'y': [sorted_species[neg_count - 1]]})
+divider = alt.Chart(divider_df).mark_rule(
+    color='gray', strokeWidth=2, strokeDash=[4, 4]
+).encode(y=alt.Y('y:N', sort=sorted_species))
+
+# Final Layout Assembly
+final_chart = alt.layer(heatmap, divider).configure_view(strokeWidth=0)
+
+# 5. Streamlit App Display & Custom Legend
 st.set_page_config(page_title="Burtin Antibiotic Analysis", layout="centered")
 st.title("Antibiotic Resistance & Gram Staining Correlation")
+
 st.altair_chart(final_chart, use_container_width=True)
+
+# Custom Streamlit HTML Legend (Clean & Minimalist)
+st.markdown("""
+<div style="display: flex; gap: 30px; font-size: 14px; margin-top: -10px;">
+    <div>
+        <span style="font-weight: bold; color: #c2185b;">■ Gram-Negative (Pink):</span> 
+        Light Pink (Low Effectiveness) → Dark Pink (High Effectiveness)
+    </div>
+    <div>
+        <span style="font-weight: bold; color: #4a148c;">■ Gram-Positive (Purple):</span> 
+        Light Purple (Low Effectiveness) → Dark Purple (High Effectiveness)
+    </div>
+</div>
+""", unsafe_allow_html=True)
